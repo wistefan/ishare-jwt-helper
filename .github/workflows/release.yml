@@ -70,7 +70,7 @@ jobs:
 
   git-release:
     needs:
-      - endpoint-configuration-service
+      - generate-version
       - ishare-jwt-helper
     
     runs-on: ubuntu-latest
