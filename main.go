@@ -2,10 +2,9 @@ package main
 
 import (
 	"crypto/rsa"
-	"encoding/base64"
-	"encoding/pem"
 	"io/ioutil"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt"
@@ -64,7 +63,7 @@ func main() {
 		return
 	}
 
-	x5cCerts := [1]string{cert}
+	x5cCerts := cert
 	jwtToken.Header["x5c"] = x5cCerts
 
 	// sign the token
@@ -101,20 +100,45 @@ func getSigningKey(credentialsFolderPath string) (key *rsa.PrivateKey, err error
 /**
 * Read and encode(base64) certificate from file system
  */
-func getEncodedCertificate(credentialsFolderPath string) (encodedCert string, err error) {
+func getEncodedCertificate(credentialsFolderPath string) (encodedCert []string, err error) {
 	// read certificate file and set it in the token header
 	cert, err := readFile(credentialsFolderPath + "/certificate.pem")
 	if err != nil {
 		log.Warn("Was not able to read the certificateChain file.", err)
 		return encodedCert, err
 	}
-	certCer, _ := pem.Decode(cert)
-	if certCer == nil {
-		log.Warn("Was not able to decode certificate.")
+
+	certString := strings.Trim(string(cert), "-----END CERTIFICATE-----")
+	certArray := strings.Split(certString, "-----BEGIN CERTIFICATE-----")
+
+	for i := range certArray {
+		certArray[i] = strings.Trim(certArray[i], "-----BEGIN CERTIFICATE-----")
+	}
+
+	return certArray, err
+}
+
+func getCertificateChain(credentialsFolderPath string) (encodedCert []string, err error) {
+	// read certificate file and set it in the token header
+	cert_ca, err := readFile(credentialsFolderPath + "/certificate_ca.pem")
+	if err != nil {
+		log.Warn("Was not able to read the certificateChain file.", err)
 		return encodedCert, err
 	}
-	encodedCert = base64.StdEncoding.EncodeToString(certCer.Bytes)
-	return encodedCert, err
+
+	cert_intemediate, err := readFile(credentialsFolderPath + "/certificate_inter.pem")
+	if err != nil {
+		log.Warn("Was not able to read the certificateChain file.", err)
+		return encodedCert, err
+	}
+
+	cert_cli, err := readFile(credentialsFolderPath + "/certificate_cli.pem")
+	if err != nil {
+		log.Warn("Was not able to read the certificateChain file.", err)
+		return encodedCert, err
+	}
+
+	return []string{string(cert_cli), string(cert_intemediate), string(cert_ca)}, err
 }
 
 func readFile(filename string) ([]byte, error) {
