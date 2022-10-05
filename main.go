@@ -107,12 +107,11 @@ func getEncodedCertificate(credentialsFolderPath string) (encodedCert []string, 
 		log.Warn("Was not able to read the certificateChain file.", err)
 		return encodedCert, err
 	}
-
-	certString := strings.Trim(string(cert), "-----END CERTIFICATE-----")
+	certString := strings.ReplaceAll(string(cert), "-----END CERTIFICATE-----", "")
 	certArray := strings.Split(certString, "-----BEGIN CERTIFICATE-----")
 
 	for i := range certArray {
-		certArray[i] = strings.Trim(certArray[i], "-----BEGIN CERTIFICATE-----")
+		certArray[i] = strings.ReplaceAll(certArray[i], "-----BEGIN CERTIFICATE-----", "")
 	}
 
 	return certArray, err
