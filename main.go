@@ -108,11 +108,11 @@ func getEncodedCertificate(credentialsFolderPath string) (encodedCert []string, 
 		return encodedCert, err
 	}
 
-	certString := strings.Trim(string(cert), "-----END CERTIFICATE-----")
-	certArray := strings.Split(certString, "-----BEGIN CERTIFICATE-----")
+	certString := strings.ReplaceAll(string(cert), "-----END CERTIFICATE-----\n", "")
+	certArray := strings.Split(certString, "-----BEGIN CERTIFICATE-----\n")
 
 	for i := range certArray {
-		certArray[i] = strings.Trim(certArray[i], "-----BEGIN CERTIFICATE-----")
+		certArray[i] = strings.ReplaceAll(certArray[i], "-----BEGIN CERTIFICATE-----\n", "")
 	}
 
 	return certArray, err
