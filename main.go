@@ -115,6 +115,8 @@ func getEncodedCertificate(credentialsFolderPath string) (encodedCert []string, 
 		certArray[i] = strings.ReplaceAll(certArray[i], "-----BEGIN CERTIFICATE-----\n", "")
 	}
 
+	certArray = delete_empty(certArray)
+
 	return certArray, err
 }
 
@@ -143,4 +145,14 @@ func getCertificateChain(credentialsFolderPath string) (encodedCert []string, er
 
 func readFile(filename string) ([]byte, error) {
 	return ioutil.ReadFile(filename)
+}
+
+func delete_empty(s []string) []string {
+	var r []string
+	for _, str := range s {
+		if str != "" {
+			r = append(r, str)
+		}
+	}
+	return r
 }
