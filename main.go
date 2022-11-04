@@ -2,33 +2,95 @@ package main
 
 import (
 	"crypto/rsa"
+	"fmt"
 	"io/ioutil"
+	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 )
 
-func main() {
+var runServer bool = false
 
-	iShareClientID := os.Getenv("I_SHARE_CLIENT_ID")
-	iShareIdpID := os.Getenv("I_SHARE_IDP_ID")
+var iShareClientID string
+var iShareIdpID string
+var defaultKeyPath string = "/certificates/key.pem"
+var defaultCertPath string = "/certificates/certificate.pem"
+var keyPath string
+var certificatePath string
+var serverPort int = 8080
+
+func init() {
+
+	serverEnabled, err := strconv.ParseBool(os.Getenv("RUN_SERVER"))
+	if err == nil && serverEnabled {
+		runServer = serverEnabled
+	}
+
+	serverPortEnvVar := os.Getenv("SERVER_PORT")
+	serverPort, err := strconv.Atoi(serverPortEnvVar)
+	if err != nil {
+		log.Warnf("No valid server port was provided, run on default %s.", serverPort)
+	}
+
+	iShareClientID = os.Getenv("I_SHARE_CLIENT_ID")
+	iShareIdpID = os.Getenv("I_SHARE_IDP_ID")
 	if iShareClientID == "" {
-		log.Error("No I_SHARE_CLIENT_ID provided")
+		log.Fatalf("No I_SHARE_CLIENT_ID provided")
 		return
 	}
 	if iShareIdpID == "" {
-		log.Error("No I_SHARE_IDP_ID provided")
+		log.Fatalf("No I_SHARE_IDP_ID provided")
 		return
 	}
-	// the files are stored in folders namend by the clientId
-	credentialsFolderPath := "/certificates"
+	keyPath = os.Getenv("KEY_PATH")
+	certificatePath = os.Getenv("CERT_PATH")
+	if keyPath == "" {
+		keyPath = defaultKeyPath
+	}
+	if certificatePath == "" {
+		certificatePath = defaultCertPath
+	}
+}
 
-	log.Info("CredentialsFolderPath: " + credentialsFolderPath)
+func main() {
 
+	if runServer {
+
+		router := gin.Default()
+
+		router.GET("/token", token)
+
+		router.Run(fmt.Sprintf("0.0.0.0:%v", serverPort))
+		log.Infof("Started router at %v", serverPort)
+	} else {
+		token, _ := generateToken()
+		log.Infof("Token: %s", token)
+	}
+
+}
+
+type Token struct {
+	Token string `json:"token"`
+}
+
+func token(c *gin.Context) {
+	token, err := generateToken()
+
+	if err != nil {
+		c.AbortWithError(http.StatusInternalServerError, err)
+		return
+	}
+	c.AbortWithStatusJSON(http.StatusOK, Token{token})
+}
+
+func generateToken() (token string, err error) {
 	randomUuid, err := uuid.NewRandom()
 
 	if err != nil {
@@ -47,7 +109,7 @@ func main() {
 		"exp": now + 30,
 	})
 
-	key, err := getSigningKey(credentialsFolderPath)
+	key, err := getSigningKey(keyPath)
 	if err != nil {
 		log.Warn("Was not able to read the signing key.")
 		return
@@ -57,7 +119,7 @@ func main() {
 		return
 	}
 
-	cert, err := getEncodedCertificate(credentialsFolderPath)
+	cert, err := getEncodedCertificate(certificatePath)
 	if err != nil {
 		log.Warn("Was not able to read the certificate.")
 		return
@@ -74,14 +136,15 @@ func main() {
 	}
 
 	log.Infof("Token: %s", signedToken)
+	return signedToken, err
 }
 
 /**
 * Read siging key from local filesystem
  */
-func getSigningKey(credentialsFolderPath string) (key *rsa.PrivateKey, err error) {
+func getSigningKey(keyPath string) (key *rsa.PrivateKey, err error) {
 	// read key file
-	priv, err := readFile(credentialsFolderPath + "/key.pem")
+	priv, err := readFile(keyPath)
 	if err != nil {
 		log.Warn("Was not able to read the key file. ", err)
 		return key, err
@@ -100,9 +163,9 @@ func getSigningKey(credentialsFolderPath string) (key *rsa.PrivateKey, err error
 /**
 * Read and encode(base64) certificate from file system
  */
-func getEncodedCertificate(credentialsFolderPath string) (encodedCert []string, err error) {
+func getEncodedCertificate(certificatePath string) (encodedCert []string, err error) {
 	// read certificate file and set it in the token header
-	cert, err := readFile(credentialsFolderPath + "/certificate.pem")
+	cert, err := readFile(certificatePath)
 	if err != nil {
 		log.Warn("Was not able to read the certificateChain file.", err)
 		return encodedCert, err
@@ -118,29 +181,6 @@ func getEncodedCertificate(credentialsFolderPath string) (encodedCert []string, 
 	certArray = delete_empty(certArray)
 
 	return certArray, err
-}
-
-func getCertificateChain(credentialsFolderPath string) (encodedCert []string, err error) {
-	// read certificate file and set it in the token header
-	cert_ca, err := readFile(credentialsFolderPath + "/certificate_ca.pem")
-	if err != nil {
-		log.Warn("Was not able to read the certificateChain file.", err)
-		return encodedCert, err
-	}
-
-	cert_intemediate, err := readFile(credentialsFolderPath + "/certificate_inter.pem")
-	if err != nil {
-		log.Warn("Was not able to read the certificateChain file.", err)
-		return encodedCert, err
-	}
-
-	cert_cli, err := readFile(credentialsFolderPath + "/certificate_cli.pem")
-	if err != nil {
-		log.Warn("Was not able to read the certificateChain file.", err)
-		return encodedCert, err
-	}
-
-	return []string{string(cert_cli), string(cert_intemediate), string(cert_ca)}, err
 }
 
 func readFile(filename string) ([]byte, error) {
