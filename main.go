@@ -2,12 +2,14 @@ package main
 
 import (
 	"crypto/rsa"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -164,35 +166,33 @@ func getSigningKey(keyPath string) (key *rsa.PrivateKey, err error) {
 * Read and encode(base64) certificate from file system
  */
 func getEncodedCertificate(certificatePath string) (encodedCert []string, err error) {
-	// read certificate file and set it in the token header
+	// read certificate file
 	cert, err := readFile(certificatePath)
 	if err != nil {
-		log.Warn("Was not able to read the certificateChain file.", err)
+		log.Warnf("Was not able to read the certificate file from %s.", certificatePath, err)
 		return encodedCert, err
 	}
+	derArray := []string{}
 
-	certString := strings.ReplaceAll(string(cert), "-----END CERTIFICATE-----\n", "")
-	certArray := strings.Split(certString, "-----BEGIN CERTIFICATE-----\n")
-
-	for i := range certArray {
-		certArray[i] = strings.ReplaceAll(certArray[i], "-----BEGIN CERTIFICATE-----\n", "")
+	for block, rest := pem.Decode(cert); block != nil; block, rest = pem.Decode(rest) {
+		switch block.Type {
+		case "CERTIFICATE":
+			// check that its a parsable certificate, only done on startup e.g. not performance critical
+			_, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				log.Warnf("Was not able to parse the certificat from %s.", certificatePath, err)
+				return encodedCert, err
+			}
+			derArray = append(derArray, base64.StdEncoding.EncodeToString(block.Bytes))
+		default:
+			log.Infof("Received unexpected block %s.", block.Type)
+			return encodedCert, fmt.Errorf("unexpected-block")
+		}
 	}
 
-	certArray = delete_empty(certArray)
-
-	return certArray, err
+	return derArray, err
 }
 
 func readFile(filename string) ([]byte, error) {
 	return ioutil.ReadFile(filename)
-}
-
-func delete_empty(s []string) []string {
-	var r []string
-	for _, str := range s {
-		if str != "" {
-			r = append(r, str)
-		}
-	}
-	return r
 }
