@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -16,17 +17,17 @@ import (
 	"github.com/golang-jwt/jwt"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v2"
 )
 
 var runServer bool = false
 
-var iShareClientID string
-var iShareIdpID string
-var defaultKeyPath string = "/certificates/key.pem"
-var defaultCertPath string = "/certificates/certificate.pem"
-var keyPath string
-var certificatePath string
+var defaultConfigPath string = "/config.yaml"
+var credentials map[string]Credential = map[string]Credential{}
 var serverPort int = 8080
+
+var defaultIShareClientID string
+var defaultIShareIdpID string
 
 func init() {
 
@@ -41,24 +42,26 @@ func init() {
 		log.Warnf("No valid server port was provided, run on default %s.", serverPort)
 	}
 
-	iShareClientID = os.Getenv("I_SHARE_CLIENT_ID")
-	iShareIdpID = os.Getenv("I_SHARE_IDP_ID")
-	if iShareClientID == "" {
-		log.Fatalf("No I_SHARE_CLIENT_ID provided")
-		return
+	configPath := os.Getenv("CONFIG_PATH")
+	if configPath == "" {
+		configPath = defaultConfigPath
 	}
-	if iShareIdpID == "" {
-		log.Fatalf("No I_SHARE_IDP_ID provided")
-		return
+
+	configBytes, err := readFile(configPath)
+
+	if err != nil {
+		log.Fatalf("Was not able to read the config %s.", configPath, err)
 	}
-	keyPath = os.Getenv("KEY_PATH")
-	certificatePath = os.Getenv("CERT_PATH")
-	if keyPath == "" {
-		keyPath = defaultKeyPath
+
+	err = yaml.Unmarshal(configBytes, credentials)
+	if err != nil {
+		log.Fatalf("Was not able to unmarshal config %s.", configPath, err)
 	}
-	if certificatePath == "" {
-		certificatePath = defaultCertPath
-	}
+
+	log.Infof("Config is: %v", credentials)
+
+	defaultIShareClientID = os.Getenv("I_SHARE_CLIENT_ID")
+	defaultIShareIdpID = os.Getenv("I_SHARE_IDP_ID")
 }
 
 func main() {
@@ -72,7 +75,7 @@ func main() {
 		router.Run(fmt.Sprintf("0.0.0.0:%v", serverPort))
 		log.Infof("Started router at %v", serverPort)
 	} else {
-		token, _ := generateToken()
+		token, _ := generateToken(defaultIShareClientID, defaultIShareIdpID)
 		log.Infof("Token: %s", token)
 	}
 
@@ -83,7 +86,18 @@ type Token struct {
 }
 
 func token(c *gin.Context) {
-	token, err := generateToken()
+	clientId := c.Query("clientId")
+	idpId := c.Query("idpId")
+
+	if clientId == "" {
+		clientId = defaultIShareClientID
+	}
+	if idpId == "" {
+		idpId = defaultIShareIdpID
+	}
+	log.Infof("Creating token for %s - %s", clientId, idpId)
+
+	token, err := generateToken(clientId, idpId)
 
 	if err != nil {
 		c.AbortWithError(http.StatusInternalServerError, err)
@@ -92,7 +106,7 @@ func token(c *gin.Context) {
 	c.AbortWithStatusJSON(http.StatusOK, Token{token})
 }
 
-func generateToken() (token string, err error) {
+func generateToken(clientId string, idpId string) (token string, err error) {
 	randomUuid, err := uuid.NewRandom()
 
 	if err != nil {
@@ -104,14 +118,21 @@ func generateToken() (token string, err error) {
 	now := time.Now().Unix()
 	jwtToken := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
 		"jti": randomUuid.String(),
-		"iss": iShareClientID,
-		"sub": iShareClientID,
-		"aud": iShareIdpID,
+		"iss": clientId,
+		"sub": clientId,
+		"aud": idpId,
 		"iat": now,
 		"exp": now + 30,
 	})
 
-	key, err := getSigningKey(keyPath)
+	credential := credentials[clientId]
+
+	if credential == (Credential{}) {
+		log.Errorf("No credentials for %s exist.", clientId)
+		return token, errors.New("no_such_credentials")
+	}
+
+	key, err := getSigningKey(credential.Key)
 	if err != nil {
 		log.Warn("Was not able to read the signing key.")
 		return
@@ -121,7 +142,7 @@ func generateToken() (token string, err error) {
 		return
 	}
 
-	cert, err := getEncodedCertificate(certificatePath)
+	cert, err := getEncodedCertificate(credential.Certificate)
 	if err != nil {
 		log.Warn("Was not able to read the certificate.")
 		return
