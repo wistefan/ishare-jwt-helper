@@ -1,0 +1,3 @@
+EU.EORI.NLHAPPYPETS:
+  certificate: "/happypets/certificate.pem"
+  key: "/happypets/key.pem"
